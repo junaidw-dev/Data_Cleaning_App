@@ -1,55 +1,148 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Upload } from 'lucide-react';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
 
-const mockData = {
-  fileName: 'customer_data.csv',
-  rows: 1250,
-  columns: [
-    { name: 'customer_id', type: 'integer' },
-    { name: 'name', type: 'string' },
-    { name: 'email', type: 'string' },
-    { name: 'age', type: 'integer' },
-    { name: 'city', type: 'string' },
-    { name: 'purchase_amount', type: 'float' },
-    { name: 'signup_date', type: 'date' },
-  ],
-  preview: [
-    { customer_id: 1, name: 'John Smith', email: 'john@email.com', age: 28, city: 'New York', purchase_amount: 150.50, signup_date: '2024-01-15' },
-    { customer_id: 2, name: 'Sarah Johnson', email: 'sarah@email.com', age: 34, city: 'Los Angeles', purchase_amount: 220.00, signup_date: '2024-01-18' },
-    { customer_id: 3, name: 'Mike Brown', email: null, age: 45, city: 'Chicago', purchase_amount: 89.99, signup_date: '2024-01-20' },
-    { customer_id: 4, name: 'Emily Davis', email: 'emily@email.com', age: null, city: 'Houston', purchase_amount: 310.25, signup_date: '2024-01-22' },
-    { customer_id: 5, name: 'David Wilson', email: 'david@email.com', age: 29, city: 'Phoenix', purchase_amount: 175.80, signup_date: '2024-01-25' },
-    { customer_id: 6, name: 'Lisa Anderson', email: 'lisa@email.com', age: 52, city: 'Philadelphia', purchase_amount: 420.00, signup_date: '2024-01-28' },
-    { customer_id: 7, name: 'James Taylor', email: 'james@email.com', age: 38, city: 'San Antonio', purchase_amount: 95.50, signup_date: '2024-02-01' },
-    { customer_id: 8, name: 'Mary Martinez', email: null, age: 41, city: 'San Diego', purchase_amount: 260.75, signup_date: '2024-02-03' },
-    { customer_id: 9, name: 'Robert Garcia', email: 'robert@email.com', age: 33, city: 'Dallas', purchase_amount: 185.00, signup_date: '2024-02-05' },
-    { customer_id: 10, name: 'Jennifer Lee', email: 'jennifer@email.com', age: 27, city: 'San Jose', purchase_amount: 340.50, signup_date: '2024-02-08' },
-  ]
-};
+interface PreviewData {
+  filename: string;
+  columns: string[];
+  rows: number;
+  preview: Record<string, any>[];
+}
 
 export default function PreviewPage() {
   const router = useRouter();
+  const [previewData, setPreviewData] = useState<PreviewData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case 'integer':
-        return 'bg-blue-100 text-blue-700';
-      case 'float':
-        return 'bg-green-100 text-green-700';
-      case 'string':
-        return 'bg-purple-100 text-purple-700';
-      case 'date':
-        return 'bg-orange-100 text-orange-700';
-      default:
-        return 'bg-slate-100 text-slate-700';
+  useEffect(() => {
+    const loadPreview = () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Get file from localStorage
+        const storedFile = localStorage.getItem('uploadedFile');
+        console.log("Stored file check:", storedFile ? "Found" : "Not found");
+        
+        if (!storedFile) {
+          setError('No file found. Please upload a dataset first.');
+          setLoading(false);
+          return;
+        }
+
+        const fileData = JSON.parse(storedFile);
+        const byteArray = new Uint8Array(fileData.data);
+        const file = new File([byteArray], fileData.name, { type: fileData.type });
+
+        console.log("Reconstructed file:", file.name, file.size);
+
+        // Call upload endpoint to get preview
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch('http://127.0.0.1:9000/upload', {
+          method: 'POST',
+          body: formData,
+        })
+          .then((response) => {
+            console.log("Response status:", response.status);
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then((data) => {
+            console.log("Preview data received:", data);
+            setPreviewData({
+              filename: data.filename,
+              columns: data.columns,
+              rows: data.rows,
+              preview: data.preview,
+            });
+            setLoading(false);
+          })
+          .catch((err) => {
+            console.error('Preview error:', err);
+            setError('Failed to load dataset preview. Please upload again.');
+            setLoading(false);
+          });
+      } catch (err) {
+        console.error('Parse error:', err);
+        setError('Failed to process dataset. Please upload again.');
+        setLoading(false);
+      }
+    };
+
+    loadPreview();
+  }, []);
+
+  const getTypeColor = (value: any) => {
+    if (value === null) return 'bg-slate-100 text-slate-700';
+    if (typeof value === 'number') {
+      return Number.isInteger(value) ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700';
     }
+    if (typeof value === 'string') {
+      if (!isNaN(Date.parse(value))) return 'bg-orange-100 text-orange-700';
+      return 'bg-purple-100 text-purple-700';
+    }
+    return 'bg-slate-100 text-slate-700';
   };
+
+  const getTypeLabel = (value: any) => {
+    if (value === null) return 'null';
+    if (typeof value === 'number') {
+      return Number.isInteger(value) ? 'integer' : 'float';
+    }
+    if (typeof value === 'string') {
+      if (!isNaN(Date.parse(value))) return 'date';
+      return 'string';
+    }
+    return 'object';
+  };
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-7xl mx-auto">
+          <div className="flex flex-col items-center justify-center py-20">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
+            <p className="text-slate-600">Loading dataset preview...</p>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (error || !previewData) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-7xl mx-auto">
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold text-slate-900 mb-2">Dataset Preview</h1>
+            <p className="text-slate-600">Review your dataset before analysis</p>
+          </div>
+
+          <Card className="p-8 text-center">
+            <Upload className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+            <p className="text-slate-600 mb-2">{error || 'No dataset loaded'}</p>
+            <Button
+              onClick={() => router.push('/upload')}
+              className="bg-blue-500 hover:bg-blue-600"
+            >
+              Upload Dataset
+            </Button>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -62,9 +155,9 @@ export default function PreviewPage() {
         <Card className="p-6 mb-6">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-xl font-semibold text-slate-900">{mockData.fileName}</h2>
+              <h2 className="text-xl font-semibold text-slate-900">{previewData.filename}</h2>
               <p className="text-sm text-slate-600 mt-1">
-                {mockData.rows.toLocaleString()} rows × {mockData.columns.length} columns
+                {previewData.rows.toLocaleString()} rows × {previewData.columns.length} columns
               </p>
             </div>
             <Button
@@ -77,43 +170,62 @@ export default function PreviewPage() {
           </div>
 
           <div className="mb-6">
-            <h3 className="text-sm font-semibold text-slate-900 mb-3">Column Types</h3>
+            <h3 className="text-sm font-semibold text-slate-900 mb-3">Column Names</h3>
             <div className="flex flex-wrap gap-2">
-              {mockData.columns.map((col) => (
-                <div key={col.name} className="flex items-center gap-2">
-                  <span className="text-sm text-slate-700 font-medium">{col.name}</span>
-                  <Badge className={getTypeColor(col.type)} variant="secondary">
-                    {col.type}
-                  </Badge>
-                </div>
-              ))}
+              {previewData.columns.map((col, idx) => {
+                // Get type from first non-null value in preview data for this column
+                const typeLabel = previewData.preview[0]
+                  ? getTypeLabel(previewData.preview[0][col])
+                  : 'unknown';
+                const typeColor = previewData.preview[0]
+                  ? getTypeColor(previewData.preview[0][col])
+                  : 'bg-slate-100 text-slate-700';
+
+                return (
+                  <div key={idx} className="flex items-center gap-2">
+                    <span className="text-sm text-slate-700 font-medium">{col}</span>
+                    <Badge className={typeColor} variant="secondary">
+                      {typeLabel}
+                    </Badge>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
           <div className="border rounded-lg overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto max-h-96">
               <table className="w-full">
-                <thead className="bg-slate-50 border-b">
+                <thead className="bg-slate-50 border-b sticky top-0">
                   <tr>
-                    {mockData.columns.map((col) => (
-                      <th key={col.name} className="px-4 py-3 text-left text-xs font-semibold text-slate-900 uppercase tracking-wider whitespace-nowrap">
-                        {col.name}
+                    {previewData.columns.map((col) => (
+                      <th
+                        key={col}
+                        className="px-4 py-3 text-left text-xs font-semibold text-slate-900 uppercase tracking-wider whitespace-nowrap"
+                      >
+                        {col}
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-200">
-                  {mockData.preview.map((row, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50">
-                      {mockData.columns.map((col) => (
-                        <td key={col.name} className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">
-                          {row[col.name as keyof typeof row] !== null && row[col.name as keyof typeof row] !== undefined ? (
-                            String(row[col.name as keyof typeof row])
-                          ) : (
-                            <span className="text-red-500 italic">null</span>
-                          )}
-                        </td>
-                      ))}
+                  {previewData.preview.map((row, rowIdx) => (
+                    <tr key={rowIdx} className="hover:bg-slate-50">
+                      {previewData.columns.map((col) => {
+                        const value = row[col];
+                        return (
+                          <td
+                            key={`${rowIdx}-${col}`}
+                            className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap"
+                          >
+                            {value !== null && value !== undefined ? (
+                              <span>{String(value)}</span>
+                            ) : (
+                              <span className="text-red-500 italic">null</span>
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
@@ -122,7 +234,7 @@ export default function PreviewPage() {
           </div>
 
           <p className="text-xs text-slate-500 mt-4">
-            Showing first 10 rows of {mockData.rows.toLocaleString()}
+            Showing all {previewData.rows.toLocaleString()} rows and {previewData.columns.length} columns
           </p>
         </Card>
       </div>

@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^cd /Users/muhammadjunaidwaheed/Python_projects/Data_Cleaning_App/backend && source \\.\\./\\.venv/bin/activate && python -m uvicorn main:app --reload --port 8000$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

@@ -47,12 +47,43 @@ export default function UploadPage() {
 
     setIsUploading(true);
 
-    setTimeout(() => {
+    try {
+      const reader = new FileReader();
+      
+      reader.onload = (event) => {
+        try {
+          const arrayBuffer = event.target?.result as ArrayBuffer;
+          const fileData = {
+            name: uploadedFile.name,
+            type: uploadedFile.type,
+            data: Array.from(new Uint8Array(arrayBuffer)),
+            timestamp: Date.now(),
+          };
+          localStorage.setItem('uploadedFile', JSON.stringify(fileData));
+          console.log("File stored in localStorage:", uploadedFile.name);
+          
+          // Small delay to ensure storage is complete
+          setTimeout(() => {
+            setIsUploading(false);
+            router.push("/preview");
+          }, 100);
+        } catch (error) {
+          console.error("Storage error:", error);
+          setIsUploading(false);
+        }
+      };
+      
+      reader.onerror = () => {
+        console.error("File read error");
+        setIsUploading(false);
+      };
+      
+      reader.readAsArrayBuffer(uploadedFile);
+    } catch (error) {
+      console.error("Upload failed:", error);
       setIsUploading(false);
-      router.push('/preview');
-    }, 300);
+    }
   };
-
   const removeFile = () => {
     setUploadedFile(null);
   };
