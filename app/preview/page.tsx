@@ -20,6 +20,7 @@ export default function PreviewPage() {
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [datasetId, setDatasetId] = useState<string | null>(null);
 
   useEffect(() => {
     const loadPreview = () => {
@@ -29,6 +30,8 @@ export default function PreviewPage() {
 
         // Get file from localStorage
         const storedFile = localStorage.getItem('uploadedFile');
+        const storedDatasetId = localStorage.getItem('uploadedDatasetId');
+        setDatasetId(storedDatasetId || null);
         console.log("Stored file check:", storedFile ? "Found" : "Not found");
         
         if (!storedFile) {
@@ -47,7 +50,7 @@ export default function PreviewPage() {
         const formData = new FormData();
         formData.append('file', file);
 
-        fetch('http://127.0.0.1:9000/upload', {
+        fetch('http://localhost:8000/upload', {
           method: 'POST',
           body: formData,
         })
@@ -161,7 +164,9 @@ export default function PreviewPage() {
               </p>
             </div>
             <Button
-              onClick={() => router.push('/analysis')}
+              onClick={() =>
+                router.push(datasetId ? `/analysis?datasetId=${datasetId}` : '/analysis')
+              }
               className="bg-blue-500 hover:bg-blue-600"
             >
               <Sparkles className="mr-2 h-4 w-4" />

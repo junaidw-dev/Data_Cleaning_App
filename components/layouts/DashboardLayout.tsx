@@ -2,7 +2,7 @@
 
 import { ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Chrome as Home, Upload, FileText, ChartBar as BarChart3, Sparkles } from 'lucide-react';
+import { Chrome as Home, Upload, FileText, ChartBar as BarChart3, Sparkles, Folder } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface DashboardLayoutProps {
@@ -11,9 +11,11 @@ interface DashboardLayoutProps {
 
 const navigation = [
   { name: 'Home', href: '/', icon: Home },
-  { name: 'Upload', href: '/upload', icon: Upload },
-  { name: 'Preview', href: '/preview', icon: FileText },
-  { name: 'Analysis', href: '/analysis', icon: BarChart3 },
+  { name: 'Projects', href: '/projects', icon: Folder },
+  { name: 'Upload Dataset', href: '/upload', icon: Upload },
+  { name: 'Preview Dataset', href: '/preview', icon: FileText },
+  { name: 'Analysis Dashboard', href: '/analysis', icon: BarChart3 },
+  { name: 'Reports', href: '/reports', icon: FileText },
 ];
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {

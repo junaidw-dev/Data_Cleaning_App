@@ -1,17 +1,44 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Upload, File, X } from 'lucide-react';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
+import { useProjects, useDatasets, Project } from '@/hooks/useDataApi';
+import { ProtectedRoute } from '@/app/components/ProtectedRoute';
 
 export default function UploadPage() {
   const router = useRouter();
+  const { listProjects } = useProjects();
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const { uploadDataset } = useDatasets(selectedProjectId);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadProjects = async () => {
+      try {
+        const data = await listProjects();
+        if (!cancelled) setProjects(data);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load projects');
+        }
+      }
+    };
+
+    loadProjects();
+    return () => {
+      cancelled = true;
+    };
+  }, [listProjects]);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -46,8 +73,18 @@ export default function UploadPage() {
     if (!uploadedFile) return;
 
     setIsUploading(true);
+    setError(null);
 
     try {
+      let uploadedDatasetId: string | null = null;
+      if (selectedProjectId) {
+        const dataset = await uploadDataset(uploadedFile);
+        uploadedDatasetId = dataset.id;
+        localStorage.setItem('uploadedDatasetId', dataset.id);
+      } else {
+        localStorage.removeItem('uploadedDatasetId');
+      }
+
       const reader = new FileReader();
       
       reader.onload = (event) => {
@@ -81,6 +118,7 @@ export default function UploadPage() {
       reader.readAsArrayBuffer(uploadedFile);
     } catch (error) {
       console.error("Upload failed:", error);
+      setError(error instanceof Error ? error.message : 'Upload failed');
       setIsUploading(false);
     }
   };
@@ -97,12 +135,39 @@ export default function UploadPage() {
   };
 
   return (
-    <DashboardLayout>
-      <div className="max-w-3xl mx-auto">
+    <ProtectedRoute>
+      <DashboardLayout>
+        <div className="max-w-3xl mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Upload Dataset</h1>
           <p className="text-slate-600">Upload your CSV or Excel file to get started with data quality analysis</p>
         </div>
+
+        {error && (
+          <Card className="p-4 mb-6 border border-red-200 bg-red-50 text-red-700">
+            {error}
+          </Card>
+        )}
+
+        <Card className="p-6 mb-6">
+          <h2 className="text-sm font-semibold text-slate-900 mb-3">Attach to Project (Optional)</h2>
+          <div className="grid gap-2">
+            <label className="text-xs text-slate-500">Project</label>
+            <select
+              value={selectedProjectId}
+              onChange={(event) => setSelectedProjectId(event.target.value)}
+              className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select a project</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-500">Datasets will appear under the chosen project.</p>
+          </div>
+        </Card>
 
         <Card className="p-8">
           <div
@@ -182,7 +247,8 @@ export default function UploadPage() {
             </div>
           )}
         </Card>
-      </div>
-    </DashboardLayout>
+        </div>
+      </DashboardLayout>
+    </ProtectedRoute>
   );
 }

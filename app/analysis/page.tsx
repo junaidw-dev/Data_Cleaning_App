@@ -1,12 +1,23 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { TriangleAlert as AlertTriangle, Copy, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Circle as XCircle, Upload } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { TriangleAlert as AlertTriangle, Copy, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Upload } from 'lucide-react';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
+import { useAuth } from '@/app/context/AuthContext';
 
 interface AnalysisData {
   profile: {
@@ -41,22 +52,129 @@ interface AnalysisData {
     recommendation: string;
   }>;
   categorized_recommendations: Record<string, Array<any>>;
-  cleaning_code: {
+  cleaning_code?: {
     basic: string;
     advanced: string;
+  };
+  visualizations?: {
+    missing_values?: {
+      labels: string[];
+      values: number[];
+      percentages: number[];
+    };
+    correlation?: {
+      columns: string[];
+      correlation_matrix: number[][];
+    };
+    box_plots?: Record<string, {
+      min: number;
+      q1: number;
+      median: number;
+      q3: number;
+      max: number;
+      lower_whisker: number;
+      upper_whisker: number;
+      outlier_count: number;
+    }>;
+    quality_heatmap?: {
+      columns: string[];
+      metrics: {
+        completeness: number[];
+        uniqueness: number[];
+        validity: number[];
+      };
+    };
   };
 }
 
 export default function AnalysisPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { token } = useAuth();
   const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [codeType, setCodeType] = useState<'basic' | 'advanced'>('basic');
+  const [downloading, setDownloading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const datasetId = searchParams.get('datasetId');
 
   useEffect(() => {
+    if (datasetId) {
+      if (!token) {
+        setError('Please sign in to view saved analyses.');
+        setLoading(false);
+        return;
+      }
+
+      const loadDatasetAnalysis = async () => {
+        try {
+          setLoading(true);
+          setError(null);
+
+          const response = await fetch(
+            `${process.env.NEXT_PUBLIC_API_URL}/api/datasets/${datasetId}/analysis`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            setAnalysisData({
+              profile: data.profile,
+              recommendations: data.recommendations || [],
+              categorized_recommendations: data.categorized_recommendations || {},
+              cleaning_code: data.cleaning_code,
+              visualizations: data.visualizations,
+            });
+            return;
+          }
+
+          if (response.status === 404) {
+            const analyzeResponse = await fetch(
+              `${process.env.NEXT_PUBLIC_API_URL}/api/datasets/${datasetId}/analyze`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              }
+            );
+
+            if (!analyzeResponse.ok) {
+              const errorText = await analyzeResponse.text();
+              throw new Error(errorText || 'Failed to run analysis');
+            }
+
+            const analysis = await analyzeResponse.json();
+            setAnalysisData({
+              profile: analysis.profile,
+              recommendations: analysis.recommendations || [],
+              categorized_recommendations: analysis.categorized_recommendations || {},
+              cleaning_code: analysis.cleaning_code,
+              visualizations: analysis.visualizations,
+            });
+            return;
+          }
+
+          const errorText = await response.text();
+          throw new Error(errorText || 'Failed to load analysis');
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to load analysis');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      loadDatasetAnalysis();
+      return;
+    }
+
     // Check if user has uploaded a file in the upload page
     const storedFile = localStorage.getItem('uploadedFile');
     if (storedFile) {
@@ -70,7 +188,7 @@ export default function AnalysisPage() {
     } else {
       setLoading(false);
     }
-  }, []);
+  }, [datasetId, token]);
 
   const performAnalysis = async (fileData: any) => {
     try {
@@ -92,7 +210,7 @@ export default function AnalysisPage() {
       try {
         // log file information for debugging
       console.log('Sending file to /analyze', file.name, file.size, file.type);
-      const response = await fetch('http://127.0.0.1:9000/analyze', {
+      const response = await fetch('http://localhost:8000/analyze', {
           method: 'POST',
           body: formData,
           signal: controller.signal,
@@ -114,6 +232,7 @@ export default function AnalysisPage() {
           recommendations: data.recommendations,
           categorized_recommendations: data.categorized_recommendations,
           cleaning_code: data.cleaning_code,
+          visualizations: data.visualizations,
         });
       } catch (fetchError: any) {
         clearTimeout(timeoutId);
@@ -174,7 +293,7 @@ Ivy,30,59000,IT`;
   };
 
   const copyCode = () => {
-    const code = codeType === 'basic' ? analysisData?.cleaning_code.basic : analysisData?.cleaning_code.advanced;
+    const code = codeType === 'basic' ? analysisData?.cleaning_code?.basic : analysisData?.cleaning_code?.advanced;
     if (code) {
       navigator.clipboard.writeText(code);
       setCodeCopied(true);
@@ -297,6 +416,33 @@ Ivy,30,59000,IT`;
       columns: Object.keys(analysisData.profile.outliers.columns_with_outliers),
     }] : []),
   ];
+
+  const missingChartData = analysisData.visualizations?.missing_values?.labels.map((label, idx) => ({
+    name: label,
+    missing: analysisData.visualizations?.missing_values?.values[idx] ?? 0,
+    percent: analysisData.visualizations?.missing_values?.percentages[idx] ?? 0,
+  })) || [];
+
+  const outlierChartData = Object.entries(analysisData.profile.outliers.columns_with_outliers || {}).map(
+    ([column, details]: any) => ({
+      name: column,
+      outliers: details.count || 0,
+    })
+  );
+
+  const heatmapColumns = analysisData.visualizations?.quality_heatmap?.columns || [];
+  const heatmapMetrics = analysisData.visualizations?.quality_heatmap?.metrics;
+
+  const correlationColumns = analysisData.visualizations?.correlation?.columns || [];
+  const correlationMatrix = analysisData.visualizations?.correlation?.correlation_matrix || [];
+
+  const getHeatColor = (value: number) => {
+    if (value >= 90) return 'bg-green-500/20 text-green-700';
+    if (value >= 75) return 'bg-emerald-500/20 text-emerald-700';
+    if (value >= 60) return 'bg-yellow-500/20 text-yellow-700';
+    if (value >= 45) return 'bg-orange-500/20 text-orange-700';
+    return 'bg-red-500/20 text-red-700';
+  };
 
   return (
     <DashboardLayout>
@@ -450,6 +596,149 @@ Ivy,30,59000,IT`;
           </div>
         )}
 
+        {/* Visualizations */}
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold text-slate-900 mb-4">Data Visualizations</h2>
+          <div className="grid lg:grid-cols-2 gap-6">
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Missing Values</h3>
+                  <p className="text-xs text-slate-500">Columns with missing entries</p>
+                </div>
+              </div>
+              {missingChartData.length === 0 ? (
+                <p className="text-sm text-slate-500">No missing values detected.</p>
+              ) : (
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={missingChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="missing" name="Missing Count" fill="#f97316" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </Card>
+
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Outlier Counts</h3>
+                  <p className="text-xs text-slate-500">Detected outliers by column</p>
+                </div>
+              </div>
+              {outlierChartData.length === 0 ? (
+                <p className="text-sm text-slate-500">No outliers detected.</p>
+              ) : (
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={outlierChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="outliers" name="Outliers" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </Card>
+
+            <Card className="p-6 lg:col-span-2">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Data Quality Heatmap</h3>
+                  <p className="text-xs text-slate-500">Completeness, uniqueness, and validity by column</p>
+                </div>
+              </div>
+              {!heatmapMetrics || heatmapColumns.length === 0 ? (
+                <p className="text-sm text-slate-500">Heatmap data unavailable for this dataset.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-xs border border-slate-200 rounded-lg">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-slate-600">Metric</th>
+                        {heatmapColumns.map((col) => (
+                          <th key={col} className="px-3 py-2 text-left text-slate-600 whitespace-nowrap">
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(['completeness', 'uniqueness', 'validity'] as const).map((metric) => (
+                        <tr key={metric} className="border-t border-slate-200">
+                          <td className="px-3 py-2 font-semibold text-slate-700 capitalize">{metric}</td>
+                          {heatmapMetrics[metric].map((value, idx) => (
+                            <td key={`${metric}-${idx}`} className="px-3 py-2">
+                              <span className={`inline-flex items-center justify-center rounded-md px-2 py-1 ${getHeatColor(value)}`}>
+                                {value.toFixed(0)}%
+                              </span>
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+
+            <Card className="p-6 lg:col-span-2">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Correlation Matrix</h3>
+                  <p className="text-xs text-slate-500">Numeric feature relationships</p>
+                </div>
+              </div>
+              {correlationColumns.length < 2 ? (
+                <p className="text-sm text-slate-500">Not enough numeric columns to display correlations.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-xs border border-slate-200 rounded-lg">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-3 py-2"></th>
+                        {correlationColumns.map((col) => (
+                          <th key={col} className="px-3 py-2 text-left text-slate-600 whitespace-nowrap">
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {correlationMatrix.map((row, rowIdx) => (
+                        <tr key={`corr-${rowIdx}`} className="border-t border-slate-200">
+                          <td className="px-3 py-2 font-semibold text-slate-700 whitespace-nowrap">
+                            {correlationColumns[rowIdx]}
+                          </td>
+                          {row.map((value, colIdx) => {
+                            const colorClass = value >= 0 ? 'bg-blue-500/10 text-blue-700' : 'bg-red-500/10 text-red-700';
+                            return (
+                              <td key={`corr-${rowIdx}-${colIdx}`} className="px-3 py-2">
+                                <span className={`inline-flex items-center justify-center rounded-md px-2 py-1 ${colorClass}`}>
+                                  {value.toFixed(2)}
+                                </span>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          </div>
+        </div>
+
         {/* Recommendations */}
         <div className="mb-8">
           <h2 className="text-xl font-semibold text-slate-900 mb-4">AI Recommendations</h2>
@@ -493,12 +782,14 @@ Ivy,30,59000,IT`;
               <Button
                 variant={codeType === 'basic' ? 'default' : 'outline'}
                 onClick={() => setCodeType('basic')}
+                disabled={!analysisData.cleaning_code}
               >
                 Basic
               </Button>
               <Button
                 variant={codeType === 'advanced' ? 'default' : 'outline'}
                 onClick={() => setCodeType('advanced')}
+                disabled={!analysisData.cleaning_code}
               >
                 Advanced (sklearn)
               </Button>
@@ -506,6 +797,7 @@ Ivy,30,59000,IT`;
                 onClick={copyCode}
                 variant="outline"
                 className={codeCopied ? 'border-green-500 text-green-600' : ''}
+                disabled={!analysisData.cleaning_code}
               >
                 {codeCopied ? (
                   <>
@@ -525,7 +817,13 @@ Ivy,30,59000,IT`;
           <Card className="p-0 overflow-hidden">
             <div className="bg-slate-900 text-slate-100 p-6 overflow-x-auto max-h-96 overflow-y-auto">
               <pre className="text-sm font-mono leading-relaxed">
-                <code>{codeType === 'basic' ? analysisData.cleaning_code.basic : analysisData.cleaning_code.advanced}</code>
+                <code>
+                  {analysisData.cleaning_code
+                    ? codeType === 'basic'
+                      ? analysisData.cleaning_code.basic
+                      : analysisData.cleaning_code.advanced
+                    : '# Cleaning code is available after running the legacy analyze endpoint.'}
+                </code>
               </pre>
             </div>
           </Card>
@@ -534,7 +832,193 @@ Ivy,30,59000,IT`;
             This code is ready to use. Simply copy and paste it into your Python environment.
           </p>
         </div>
+
+        {/* Export and Download Section */}
+        <div className="mt-12 pt-8 border-t border-slate-200">
+          <h2 className="text-xl font-semibold text-slate-900 mb-4">Export & Download</h2>
+          <div className="grid md:grid-cols-3 gap-4">
+            <Button
+              onClick={handleDownloadCleanedDataset}
+              disabled={downloading}
+              className="bg-green-600 hover:bg-green-700 text-white flex items-center gap-2"
+            >
+              {downloading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  Downloading...
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4" />
+                  Download Cleaned Dataset
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={handleExportHTMLReport}
+              disabled={exporting}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              {exporting ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-slate-900"></div>
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Copy className="h-4 w-4" />
+                  Export HTML Report
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={() => router.push('/upload')}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              <Upload className="h-4 w-4" />
+              Analyze New Dataset
+            </Button>
+          </div>
+        </div>
       </div>
     </DashboardLayout>
   );
+
+  // Handler functions for new features
+  function handleDownloadCleanedDataset() {
+    if (!uploadedFile) {
+      alert('No file uploaded. Please upload a dataset first.');
+      return;
+    }
+    
+    setDownloading(true);
+    const formData = new FormData();
+    formData.append('file', uploadedFile);
+    
+    console.log('Starting download of cleaned dataset...');
+    
+    fetch('http://localhost:8000/clean', {
+      method: 'POST',
+      body: formData,
+    })
+      .then(response => {
+        console.log('Response status:', response.status);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        console.log('Response data received:', data.success);
+        
+        if (!data.success) {
+          throw new Error('Failed to clean dataset');
+        }
+        
+        if (!data.cleaned_csv_base64) {
+          throw new Error('No cleaned data in response');
+        }
+        
+        console.log('Creating download link...');
+        
+        // Decode base64 and create blob
+        const byteCharacters = atob(data.cleaned_csv_base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'text/csv;charset=utf-8;' });
+        
+        // Create download link
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.href = url;
+        link.download = data.cleaned_filename || 'cleaned_dataset.csv';
+        link.style.display = 'none';
+        
+        document.body.appendChild(link);
+        console.log('Clicking download link...');
+        link.click();
+        
+        // Cleanup
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          setDownloading(false);
+          console.log('Download complete');
+        }, 100);
+      })
+      .catch(err => {
+        console.error('Download failed:', err);
+        alert(`Download failed: ${err.message}`);
+        setDownloading(false);
+      });
+  }
+
+  function handleExportHTMLReport() {
+    if (!uploadedFile) {
+      alert('No file uploaded. Please upload a dataset first.');
+      return;
+    }
+    
+    setExporting(true);
+    const formData = new FormData();
+    formData.append('file', uploadedFile);
+    
+    console.log('Starting HTML report export...');
+    
+    fetch('http://localhost:8000/export/html-report', {
+      method: 'POST',
+      body: formData,
+    })
+      .then(response => {
+        console.log('Response status:', response.status);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        console.log('Report data received:', data.success);
+        
+        if (!data.success) {
+          throw new Error('Failed to generate report');
+        }
+        
+        if (!data.html) {
+          throw new Error('No HTML content in response');
+        }
+        
+        console.log('Creating HTML blob...');
+        
+        const blob = new Blob([data.html], { type: 'text/html;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.href = url;
+        link.download = `report_${new Date().toISOString().split('T')[0]}.html`;
+        link.style.display = 'none';
+        
+        document.body.appendChild(link);
+        console.log('Clicking download link...');
+        link.click();
+        
+        // Cleanup
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          setExporting(false);
+          console.log('Export complete');
+        }, 100);
+      })
+      .catch(err => {
+        console.error('Report export failed:', err);
+        alert(`Report export failed: ${err.message}`);
+        setExporting(false);
+      });
+  }
 }
